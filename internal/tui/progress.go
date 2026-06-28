@@ -124,6 +124,13 @@ func (m *procModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Width > 4 {
 			m.progress.Width = msg.Width - 4
 		}
+	case progress.FrameMsg:
+		// Drive the progress bar animation toward the last SetPercent target.
+		mod, cmd := m.progress.Update(msg)
+		if pm, ok := mod.(progress.Model); ok {
+			m.progress = pm
+		}
+		return m, cmd
 	case quitDoneMsg:
 		return m, m.startTrash()
 	case trashStepMsg:
