@@ -4,22 +4,14 @@ import (
 	"fmt"
 	"text/tabwriter"
 
+	"github.com/thaitrn/binman/internal/human"
 	"github.com/thaitrn/binman/internal/safety"
 	"github.com/thaitrn/binman/internal/scan"
 )
 
 // humanBytes formats a byte count in binary units (KiB, MiB, ...).
 func humanBytes(b int64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
+	return human.Bytes(b)
 }
 
 // totalSize sums the Size of all matches.
