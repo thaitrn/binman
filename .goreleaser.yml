@@ -1,0 +1,50 @@
+version: 2
+
+project_name: binman
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: binman
+    main: .
+    binary: binman
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [arm64, amd64]
+    ldflags:
+      - -s -w -X github.com/thaitrn/binman/cmd.Version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{- title .Os }}_{{- if eq .Arch "amd64" }}x86_64{{- else }}{{ .Arch }}{{ end }}
+
+brews:
+  - repository:
+      owner: thaitrn
+      name: homebrew-binman
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/thaitrn/binman
+    description: Terminal macOS app uninstaller — uninstall apps completely + clean system junk.
+    license: MIT
+    commit_author:
+      name: thaitrn
+      email: thaitrn@users.noreply.github.com
+    install: |-
+      bin.install "binman"
+    test: |-
+      system "#{bin}/binman", "--version"
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
