@@ -21,6 +21,8 @@ falls back to AppleScript (Finder → Trash).
 ## Usage
 
 ```bash
+binman list                     # list installed apps with sizes
+binman uninstall                # no app arg + terminal: pick an app from a list, then uninstall
 binman uninstall <app>          # interactive TUI: review leftovers → confirm → Trash
 binman uninstall Slack -y       # non-interactive: delete without prompting
 binman uninstall Slack -n       # preview only (dry-run)
@@ -39,6 +41,10 @@ Global flag: `--dry-run/-n` — preview only, change nothing.
 `enter` confirm · `q`/`esc` cancel. Group/Shared containers are unchecked by
 default to avoid removing shared data.
 
+**App picker** (`binman uninstall` with no arg): type to filter · `↑↓` move ·
+`enter` select · `q`/`ctrl+c` cancel. Lists user-installed apps in
+`/Applications` (system apps in `/System` are excluded).
+
 ## Safety principles
 
 - Deletion = move to **Trash** (undoable via "Put Back"), never bare `rm` on user data.
@@ -49,4 +55,4 @@ default to avoid removing shared data.
 
 ## Roadmap (out of MVP)
 
-`list`/`info`, `startup` (login items / launch agents), `health` (purge RAM / flush DNS / thin snapshots), app updater (`mas`), large/old files, browser privacy, undo history, Homebrew tap.
+`info`, `startup` (login items / launch agents), `health` (purge RAM / flush DNS / thin snapshots), app updater (`mas`), large/old files, browser privacy, undo history, Homebrew tap. (`list` + app picker shipped.)

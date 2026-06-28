@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -9,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/thaitrn/binman/internal/app"
+	"github.com/thaitrn/binman/internal/apps"
 	"github.com/thaitrn/binman/internal/safety"
 	"github.com/thaitrn/binman/internal/scan"
 	"github.com/thaitrn/binman/internal/trash"
@@ -18,12 +20,13 @@ import (
 var uninstallApply bool
 
 var uninstallCmd = &cobra.Command{
-	Use:   "uninstall <app>",
+	Use:   "uninstall [<app>]",
 	Short: "Uninstall an app and all its ~/Library leftovers (moved to Trash)",
 	Long: `Find an app by name or path, scan ~/Library for its leftovers, then move
-everything to the Trash (undoable via Put Back). Interactive TUI by default;
---apply/-y deletes without prompting, --dry-run/-n previews only.`,
-	Args: cobra.ExactArgs(1),
+everything to the Trash (undoable via Put Back). With no app argument and a real
+terminal, an interactive app picker opens first. --apply/-y deletes without
+prompting, --dry-run/-n previews only.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runUninstall,
 }
 
@@ -33,16 +36,44 @@ func init() {
 }
 
 func runUninstall(_ *cobra.Command, args []string) error {
-	a, err := app.Resolve(args[0])
-	if err != nil {
-		return err
+	interactive := term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stdout.Fd())
+
+	var a *app.App
+	if len(args) == 0 {
+		// No app given: open the picker (interactive only).
+		if !interactive {
+			return errors.New("specify an app name/path, or run 'binman uninstall' in a terminal to use the picker")
+		}
+		entries := apps.List(apps.DefaultDirs())
+		if len(entries) == 0 {
+			return errors.New("no apps found in /Applications")
+		}
+		picked, ok, perr := tui.PickApp(entries)
+		if perr != nil {
+			return perr
+		}
+		if !ok {
+			fmt.Fprintln(os.Stderr, "aborted.")
+			return nil
+		}
+		a = picked.App
+	} else {
+		resolved, err := app.Resolve(args[0])
+		if err != nil {
+			return err
+		}
+		a = resolved
 	}
+	return uninstallApp(a, interactive)
+}
+
+// uninstallApp scans an app, shows leftovers, and trashes the selected ones.
+func uninstallApp(a *app.App, interactive bool) error {
 	matches, err := scan.Scan(a)
 	if err != nil {
 		return err
 	}
 	actionable, system := splitMatches(matches)
-	interactive := term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stdout.Fd())
 
 	// Preview-only paths: explicit --dry-run, or non-interactive without -y.
 	if dryRun || (!interactive && !uninstallApply) {
@@ -55,7 +86,6 @@ func runUninstall(_ *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Decide which items to delete.
 	var toDelete []scan.Match
 	if uninstallApply {
 		toDelete = actionable
@@ -93,8 +123,7 @@ func runUninstall(_ *cobra.Command, args []string) error {
 	return nil
 }
 
-// printSummary writes the aligned leftover table to stdout (used by previews
-// and the -y path).
+// printSummary writes the aligned leftover table to stdout (previews / -y path).
 func printSummary(a *app.App, actionable, system []scan.Match) {
 	fmt.Fprintf(os.Stderr, "%s  (%s)\n\n", a.Path, a.BundleID)
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
