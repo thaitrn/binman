@@ -6,10 +6,18 @@ Terminal macOS app uninstaller — pick apps and remove them completely (`.app` 
 
 ## Install
 
+### Homebrew (recommended)
+
+```bash
+brew install thaitrn/binman/binman
+```
+
+### From source
+
 Requires Go 1.25+ and macOS.
 
 ```bash
-git clone <repo> binman && cd binman
+git clone https://github.com/thaitrn/binman && cd binman
 make install        # builds and installs to ~/go/bin (ensure it's on $PATH)
 # or just: make build && ./binman
 ```
