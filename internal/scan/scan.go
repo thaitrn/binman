@@ -58,7 +58,7 @@ func Scan(a *app.App) ([]Match, error) {
 func ScanIn(a *app.App, home, sysRoot string) ([]Match, error) {
 	vendor := vendorPrefix(a.BundleID)
 
-	appSize, _ := dirSize(a.Path)
+	appSize, _ := DirSize(a.Path)
 	out := []Match{{Path: a.Path, Type: TypeApp, Size: appSize}}
 	seen := map[string]bool{normalize(a.Path): true}
 
@@ -77,7 +77,7 @@ func ScanIn(a *app.App, home, sysRoot string) ([]Match, error) {
 				continue
 			}
 			seen[key] = true
-			size, _ := dirSize(full)
+			size, _ := DirSize(full)
 			m := Match{Path: full, Type: loc.typ, Size: size, NeedsSudo: loc.sudo}
 			if loc.typ == TypeGroupContainer {
 				m.Shared = true // reported but not selected by default
@@ -117,8 +117,9 @@ func vendorPrefix(bid string) string {
 	return bid
 }
 
-// dirSize sums file sizes recursively; unreadable entries are skipped silently.
-func dirSize(path string) (int64, error) {
+// DirSize sums file sizes recursively; unreadable entries are skipped silently.
+// Exported so other packages (e.g. clean) can reuse it.
+func DirSize(path string) (int64, error) {
 	var total int64
 	err := filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
