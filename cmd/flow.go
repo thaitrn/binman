@@ -58,20 +58,18 @@ func runPickerFlow() error {
 		}
 	}
 
-	// Quit running instances before deleting their data.
+	// 5-6. Process (quit → trash → verify → done) + results.
+	var running []string
 	for _, e := range selected {
 		if safety.IsAppRunning(e.App.Name) {
-			fmt.Fprintf(os.Stderr, "quitting %s...\n", e.App.Name)
-			_ = safety.QuitApp(e.App.Name)
+			running = append(running, e.App.Name)
 		}
 	}
-
-	// 5-6. Process + results.
-	if len(all) == 0 {
+	if len(all) == 0 && len(running) == 0 {
 		fmt.Fprintln(os.Stderr, "no removable leftovers; nothing to do.")
 		return nil
 	}
-	if _, err := tui.RunProgress(all, false); err != nil {
+	if _, err := tui.RunProcessing(names, running, all); err != nil {
 		return err
 	}
 	return nil
