@@ -1,11 +1,7 @@
 package cmd
 
 import (
-	"fmt"
-	"text/tabwriter"
-
 	"github.com/thaitrn/binman/internal/human"
-	"github.com/thaitrn/binman/internal/safety"
 	"github.com/thaitrn/binman/internal/scan"
 )
 
@@ -21,42 +17,4 @@ func totalSize(ms []scan.Match) int64 {
 		s += m.Size
 	}
 	return s
-}
-
-// splitMatches separates actionable (user-domain, not SIP-protected) leftovers
-// from system/sudo or protected ones, which the MVP reports but does not remove.
-func splitMatches(ms []scan.Match) (actionable, system []scan.Match) {
-	for _, m := range ms {
-		switch {
-		case m.NeedsSudo, isProtected(m):
-			system = append(system, m)
-		default:
-			actionable = append(actionable, m)
-		}
-	}
-	return actionable, system
-}
-
-// isProtected reports whether a match's path is SIP-protected.
-func isProtected(m scan.Match) bool {
-	return safety.IsForbidden(m.Path)
-}
-
-// printMatches prints an aligned table of actionable leftovers, then any
-// system/sudo leftovers that will be skipped.
-func printMatches(w *tabwriter.Writer, actionable, system []scan.Match) {
-	fmt.Fprintf(w, "TYPE\tSIZE\tPATH\n")
-	for _, m := range actionable {
-		flag := ""
-		if m.Shared {
-			flag = " (shared)"
-		}
-		fmt.Fprintf(w, "%s%s\t%s\t%s\n", m.Type, flag, humanBytes(m.Size), m.Path)
-	}
-	if len(system) > 0 {
-		fmt.Fprintf(w, "\t\t\n-- skipped (system / sudo / protected) --\t\t\n")
-		for _, m := range system {
-			fmt.Fprintf(w, "%s\t%s\t%s\n", m.Type, humanBytes(m.Size), m.Path)
-		}
-	}
 }

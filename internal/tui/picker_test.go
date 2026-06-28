@@ -65,3 +65,9 @@ func TestConfirmBatch_ViewRenders(t *testing.T) {
 		}
 	}
 }
+
+// step applies a message to a model and returns the result (test helper).
+func step(m tea.Model, msg tea.Msg) tea.Model {
+	out, _ := m.Update(msg)
+	return out
+}

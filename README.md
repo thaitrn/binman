@@ -1,8 +1,8 @@
 # binman
 
-Terminal macOS app cleaner — uninstall apps completely (`.app` + `~/Library` leftovers → **Trash**) and clean system junk. CleanMyMac-style, in your terminal. No GUI app.
+Terminal macOS app uninstaller — pick apps and remove them completely (`.app` + `~/Library` leftovers → **Trash**), CleanMyMac-style, in your terminal. No GUI app. Just run `binman`.
 
-> Status: **Minimal MVP** — `uninstall` + `clean`. Go + [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [Lipgloss](https://github.com/charmbracelet/lipgloss).
+> Status: **Minimal MVP**. Go + [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [Lipgloss](https://github.com/charmbracelet/lipgloss).
 
 ## Install
 
@@ -21,40 +21,36 @@ falls back to AppleScript (Finder → Trash).
 ## Usage
 
 ```bash
-binman list                     # list installed apps with sizes
-binman uninstall                # no arg + terminal: list → select MANY → confirm → Trash
-binman uninstall <app>          # uninstall a single app (leftover review TUI)
-binman uninstall Slack -y       # non-interactive: delete without prompting
-binman uninstall Slack -n       # preview only (dry-run)
+binman             # list → select many → confirm → Trash → results
+binman -n          # preview only (dry-run)
+binman -y          # skip the confirm screen and delete
 
-binman clean                    # dry-run report (caches + logs) — default safe
-binman clean --apply            # run the default cleanup
-binman clean --xcode --apply    # add Xcode artifacts
-binman clean --pkg --apply      # add brew/npm/pnpm/pip/docker cleanup
-binman clean --downloads --apply# add old installers in ~/Downloads
-binman clean --all --apply      # everything
+binman clean                 # dry-run report (caches + logs) — default safe
+binman clean --apply         # run the default cleanup
+binman clean --xcode --apply # add Xcode artifacts
+binman clean --all --apply   # everything (xcode + pkg + downloads)
 ```
 
-Global flag: `--dry-run/-n` — preview only, change nothing.
+**Flow** (`binman` with no arguments):
 
-**`uninstall` TUI keys:** `↑↓`/`jk` move · `space` toggle · `a` toggle all ·
-`enter` confirm · `q`/`esc` cancel. Group/Shared containers are unchecked by
-default to avoid removing shared data.
+1. **List** — all installed apps (`/Applications`, `~/Applications`), with sizes.
+2. **Select many** — multi-select the apps to remove (type to filter).
+3. **Confirm** — aggregate screen: N apps, leftover count, total size.
+4. **Process** — progress bar; items moved to Trash.
+5. **Results** — summary (items moved, space freed).
 
-**App picker** (`binman uninstall` with no arg): multi-select the apps to remove.
-`↑↓`/`jk` move · `space` toggle · `a` toggle all (in current filter) · type to
-**filter** · `enter` confirm selection → aggregate confirm → Trash with progress
-→ results. `q`/`ctrl+c` cancel. Shared/group containers are off by default;
-system apps (`/System`) are shown marked but skipped.
+**Keys:** `↑↓`/`jk` move · `space` toggle · `a` toggle all (in current filter) ·
+type to **filter** · `enter` confirm · `q`/`ctrl+c` cancel. Shared/group
+containers are off by default; system apps (`/System`) are shown marked but skipped.
 
 ## Safety principles
 
 - Deletion = move to **Trash** (undoable via "Put Back"), never bare `rm` on user data.
-- `clean` defaults to **dry-run**; requires `--apply` to act.
+- `-n` previews; `-y` skips confirm. `clean` defaults to dry-run and needs `--apply`.
 - Never touches SIP-protected paths (`/System`, `/usr`, `/bin`, `/sbin`, `/private/var/db`).
 - Quits a running app before deleting its data; group containers off by default.
-- `/Library` (system, needs sudo) leftovers are reported but skipped in the MVP.
+- `/Library` (system, needs sudo) leftovers are skipped in the MVP.
 
 ## Roadmap (out of MVP)
 
-`info`, `startup` (login items / launch agents), `health` (purge RAM / flush DNS / thin snapshots), app updater (`mas`), large/old files, browser privacy, undo history, Homebrew tap. (`list` + app picker shipped.)
+`startup` (login items / launch agents), `health` (purge RAM / flush DNS / thin snapshots), app updater (`mas`), large/old files, browser privacy, undo history, Homebrew tap.
