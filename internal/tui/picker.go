@@ -71,6 +71,7 @@ func newPickerModel(entries []apps.Entry) *pickerModel {
 	l.Title = "Select apps to uninstall"
 	l.SetShowStatusBar(false)
 	l.SetShowHelp(true)
+	l.SetFilteringEnabled(false) // list all apps; no type-to-filter
 	l.Styles.Title = titleStyle
 	l.Styles.PaginationStyle = helpStyle
 	l.Styles.HelpStyle = helpStyle
@@ -88,7 +89,7 @@ func (m *pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "enter":
 			return m, tea.Quit
-		case "ctrl+c":
+		case "ctrl+c", "esc":
 			m.canceled = true
 			return m, tea.Quit
 		case "q":
