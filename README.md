@@ -22,8 +22,8 @@ falls back to AppleScript (Finder → Trash).
 
 ```bash
 binman list                     # list installed apps with sizes
-binman uninstall                # no app arg + terminal: pick an app from a list, then uninstall
-binman uninstall <app>          # interactive TUI: review leftovers → confirm → Trash
+binman uninstall                # no arg + terminal: list → select MANY → confirm → Trash
+binman uninstall <app>          # uninstall a single app (leftover review TUI)
 binman uninstall Slack -y       # non-interactive: delete without prompting
 binman uninstall Slack -n       # preview only (dry-run)
 
@@ -41,9 +41,11 @@ Global flag: `--dry-run/-n` — preview only, change nothing.
 `enter` confirm · `q`/`esc` cancel. Group/Shared containers are unchecked by
 default to avoid removing shared data.
 
-**App picker** (`binman uninstall` with no arg): type to filter · `↑↓` move ·
-`enter` select · `q`/`ctrl+c` cancel. Lists user-installed apps in
-`/Applications` (system apps in `/System` are excluded).
+**App picker** (`binman uninstall` with no arg): multi-select the apps to remove.
+`↑↓`/`jk` move · `space` toggle · `a` toggle all (in current filter) · type to
+**filter** · `enter` confirm selection → aggregate confirm → Trash with progress
+→ results. `q`/`ctrl+c` cancel. Shared/group containers are off by default;
+system apps (`/System`) are shown marked but skipped.
 
 ## Safety principles
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/charmbracelet/x/term"
@@ -21,11 +22,10 @@ var uninstallApply bool
 
 var uninstallCmd = &cobra.Command{
 	Use:   "uninstall [<app>]",
-	Short: "Uninstall an app and all its ~/Library leftovers (moved to Trash)",
-	Long: `Find an app by name or path, scan ~/Library for its leftovers, then move
-everything to the Trash (undoable via Put Back). With no app argument and a real
-terminal, an interactive app picker opens first. --apply/-y deletes without
-prompting, --dry-run/-n previews only.`,
+	Short: "Uninstall app(s) and all their ~/Library leftovers (moved to Trash)",
+	Long: `With no app argument and a real terminal: list apps → select many → confirm
+→ process (Trash) → results. With an app name/path: uninstall that one app.
+--apply/-y skips confirm, --dry-run/-n previews only.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runUninstall,
 }
@@ -37,37 +37,111 @@ func init() {
 
 func runUninstall(_ *cobra.Command, args []string) error {
 	interactive := term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stdout.Fd())
-
-	var a *app.App
 	if len(args) == 0 {
-		// No app given: open the picker (interactive only).
 		if !interactive {
 			return errors.New("specify an app name/path, or run 'binman uninstall' in a terminal to use the picker")
 		}
-		entries := apps.List(apps.DefaultDirs())
-		if len(entries) == 0 {
-			return errors.New("no apps found in /Applications")
-		}
-		picked, ok, perr := tui.PickApp(entries)
-		if perr != nil {
-			return perr
-		}
-		if !ok {
-			fmt.Fprintln(os.Stderr, "aborted.")
-			return nil
-		}
-		a = picked.App
-	} else {
-		resolved, err := app.Resolve(args[0])
-		if err != nil {
-			return err
-		}
-		a = resolved
+		return runInteractiveBatch()
+	}
+	a, err := app.Resolve(args[0])
+	if err != nil {
+		return err
 	}
 	return uninstallApp(a, interactive)
 }
 
-// uninstallApp scans an app, shows leftovers, and trashes the selected ones.
+// runInteractiveBatch is the multi-app flow:
+// list → select many → confirm → process (Trash) → results.
+func runInteractiveBatch() error {
+	entries := apps.List(apps.DefaultDirs())
+	if len(entries) == 0 {
+		return errors.New("no apps found in /Applications")
+	}
+
+	// 1-2. List + multi-select.
+	selected, ok, err := tui.SelectApps(entries)
+	if err != nil {
+		return err
+	}
+	if !ok || len(selected) == 0 {
+		fmt.Fprintln(os.Stderr, "aborted.")
+		return nil
+	}
+
+	// 3. Scan aggregate leftovers (user-domain; shared excluded by default).
+	all, shared := scanSelected(selected)
+	names := make([]string, len(selected))
+	for i, e := range selected {
+		names[i] = e.App.Name
+	}
+
+	if dryRun {
+		printBatchSummary(names, all, shared)
+		fmt.Fprintln(os.Stderr, "\n(--dry-run) nothing deleted.")
+		return nil
+	}
+
+	// 4. Confirm.
+	if !uninstallApply {
+		confirmed, cerr := tui.ConfirmBatch(names, len(all), totalSize(all), shared)
+		if cerr != nil {
+			return cerr
+		}
+		if !confirmed {
+			fmt.Fprintln(os.Stderr, "aborted.")
+			return nil
+		}
+	}
+
+	// Quit running instances before deleting their data.
+	for _, e := range selected {
+		if safety.IsAppRunning(e.App.Name) {
+			fmt.Fprintf(os.Stderr, "quitting %s...\n", e.App.Name)
+			_ = safety.QuitApp(e.App.Name)
+		}
+	}
+
+	// 5-6. Process + results.
+	if len(all) == 0 {
+		fmt.Fprintln(os.Stderr, "no removable leftovers; nothing to do.")
+		return nil
+	}
+	if _, err := tui.RunProgress(all, false); err != nil {
+		return err
+	}
+	return nil
+}
+
+// scanSelected scans each app and aggregates user-domain, non-shared matches.
+func scanSelected(selected []apps.Entry) (all []scan.Match, shared int) {
+	for _, e := range selected {
+		ms, _ := scan.Scan(e.App)
+		for _, m := range ms {
+			if m.NeedsSudo || safety.IsForbidden(m.Path) {
+				continue // system/sudo leftovers: not removable in MVP
+			}
+			if m.Shared {
+				shared++
+				continue // group containers off by default
+			}
+			all = append(all, m)
+		}
+	}
+	return all, shared
+}
+
+func printBatchSummary(names []string, all []scan.Match, shared int) {
+	fmt.Fprintf(os.Stderr, "apps: %s\n", strings.Join(names, ", "))
+	fmt.Fprintf(os.Stderr, "%d leftover item(s), ~%s to Trash", len(all), humanBytes(totalSize(all)))
+	if shared > 0 {
+		fmt.Fprintf(os.Stderr, "  (%d shared skipped)", shared)
+	}
+	fmt.Fprintln(os.Stderr)
+}
+
+// --- single-app path (binman uninstall <app>) ---
+
+// uninstallApp scans one app, shows leftovers, and trashes the selected ones.
 func uninstallApp(a *app.App, interactive bool) error {
 	matches, err := scan.Scan(a)
 	if err != nil {
@@ -75,7 +149,6 @@ func uninstallApp(a *app.App, interactive bool) error {
 	}
 	actionable, system := splitMatches(matches)
 
-	// Preview-only paths: explicit --dry-run, or non-interactive without -y.
 	if dryRun || (!interactive && !uninstallApply) {
 		printSummary(a, actionable, system)
 		if dryRun {
@@ -106,12 +179,10 @@ func uninstallApp(a *app.App, interactive bool) error {
 		toDelete = selected
 	}
 
-	// Gracefully quit a running instance before deleting its data.
 	if safety.IsAppRunning(a.Name) {
 		fmt.Fprintf(os.Stderr, "quitting %s...\n", a.Name)
 		_ = safety.QuitApp(a.Name)
 	}
-
 	if interactive {
 		if _, err := tui.RunProgress(toDelete, false); err != nil {
 			return err

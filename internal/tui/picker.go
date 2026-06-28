@@ -15,20 +15,25 @@ import (
 // appItem adapts an apps.Entry for bubbles/list.
 type appItem struct{ entry apps.Entry }
 
-func (i appItem) Title() string       { return i.entry.App.Name }
-func (i appItem) Description() string { return human.Bytes(i.entry.Size) + "  " + i.entry.App.Path }
 func (i appItem) FilterValue() string { return i.entry.App.Name + " " + i.entry.App.BundleID }
 
-// appDelegate renders one row: name, size, path; marks system apps.
-type appDelegate struct{}
+// appMultiDelegate renders one row with a checkbox; selection state lives in
+// the shared *selected map (toggled by the model on space/a).
+type appMultiDelegate struct{ selected *map[string]bool }
 
-func (appDelegate) Height() int                             { return 1 }
-func (appDelegate) Spacing() int                            { return 0 }
-func (appDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
-func (d appDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+func (appMultiDelegate) Height() int                             { return 1 }
+func (appMultiDelegate) Spacing() int                            { return 0 }
+func (appMultiDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
+
+func (d appMultiDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 	it, ok := item.(appItem)
 	if !ok {
 		return
+	}
+	path := it.entry.App.Path
+	box := "☐"
+	if (*d.selected)[path] {
+		box = checkStyle.Render("☑")
 	}
 	marker := "  "
 	style := noStyle()
@@ -40,35 +45,36 @@ func (d appDelegate) Render(w io.Writer, m list.Model, index int, item list.Item
 	if it.entry.Protected {
 		name += sharedStyle.Render(" (system)")
 	}
-	// name (34) | size (10) | path (rest)
 	pathW := m.Width() - 48
 	if pathW < 10 {
 		pathW = 10
 	}
-	fmt.Fprintln(w, style.Render(fmt.Sprintf("%s%-32s %10s  %s",
-		marker, truncate(name, 32), human.Bytes(it.entry.Size), truncate(it.entry.App.Path, pathW))))
+	fmt.Fprintln(w, style.Render(fmt.Sprintf("%s%s %-32s %10s  %s",
+		marker, box, truncate(name, 32), human.Bytes(it.entry.Size), truncate(path, pathW))))
 }
 
-// pickerModel is the app-selection list.
+// pickerModel is the multi-select app list.
 type pickerModel struct {
 	list     list.Model
-	choice   *apps.Entry
+	entries  []apps.Entry
+	selected map[string]bool
 	canceled bool
 }
 
 func newPickerModel(entries []apps.Entry) *pickerModel {
+	selected := make(map[string]bool)
 	items := make([]list.Item, 0, len(entries))
 	for _, e := range entries {
 		items = append(items, appItem{entry: e})
 	}
-	l := list.New(items, appDelegate{}, 80, 20)
-	l.Title = "Select an app to uninstall"
+	l := list.New(items, appMultiDelegate{selected: &selected}, 80, 20)
+	l.Title = "Select apps to uninstall"
 	l.SetShowStatusBar(false)
 	l.SetShowHelp(true)
 	l.Styles.Title = titleStyle
 	l.Styles.PaginationStyle = helpStyle
 	l.Styles.HelpStyle = helpStyle
-	return &pickerModel{list: l}
+	return &pickerModel{list: l, entries: entries, selected: selected}
 }
 
 func (m *pickerModel) Init() tea.Cmd { return nil }
@@ -81,20 +87,21 @@ func (m *pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "enter":
-			if it, ok := m.list.SelectedItem().(appItem); ok {
-				e := it.entry
-				m.choice = &e
-			}
 			return m, tea.Quit
 		case "ctrl+c":
 			m.canceled = true
 			return m, tea.Quit
 		case "q":
-			// quit on q only when not typing a filter
 			if m.list.FilterState() == list.Unfiltered {
 				m.canceled = true
 				return m, tea.Quit
 			}
+		case " ":
+			m.toggleCurrent()
+			return m, nil
+		case "a":
+			m.toggleAllVisible()
+			return m, nil
 		}
 	}
 	var cmd tea.Cmd
@@ -102,11 +109,36 @@ func (m *pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *pickerModel) toggleCurrent() {
+	it, ok := m.list.SelectedItem().(appItem)
+	if !ok {
+		return
+	}
+	p := it.entry.App.Path
+	m.selected[p] = !m.selected[p]
+}
+
+// toggleAllVisible flips every item in the current (possibly filtered) view.
+func (m *pickerModel) toggleAllVisible() {
+	allOn := true
+	for _, it := range m.list.Items() {
+		if ai, ok := it.(appItem); ok && !m.selected[ai.entry.App.Path] {
+			allOn = false
+			break
+		}
+	}
+	for _, it := range m.list.Items() {
+		if ai, ok := it.(appItem); ok {
+			m.selected[ai.entry.App.Path] = !allOn
+		}
+	}
+}
+
 func (m *pickerModel) View() string { return m.list.View() }
 
-// PickApp runs the picker TUI and returns the chosen entry and whether the user
-// confirmed (vs canceled).
-func PickApp(entries []apps.Entry) (*apps.Entry, bool, error) {
+// SelectApps runs the multi-select picker and returns the chosen entries plus
+// whether the user confirmed (vs canceled).
+func SelectApps(entries []apps.Entry) ([]apps.Entry, bool, error) {
 	if len(entries) == 0 {
 		return nil, false, nil
 	}
@@ -117,13 +149,18 @@ func PickApp(entries []apps.Entry) (*apps.Entry, bool, error) {
 		return nil, false, err
 	}
 	pm, ok := final.(*pickerModel)
-	if !ok || pm.canceled || pm.choice == nil {
+	if !ok || pm.canceled {
 		return nil, false, nil
 	}
-	return pm.choice, true, nil
+	var out []apps.Entry
+	for _, e := range pm.entries {
+		if pm.selected[e.App.Path] {
+			out = append(out, e)
+		}
+	}
+	return out, true, nil
 }
 
-// noStyle / selectedRowStyle are small helpers to avoid re-allocating styles.
 func noStyle() lipgloss.Style { return lipgloss.NewStyle() }
 func selectedRowStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true)
