@@ -32,10 +32,10 @@ const (
 type matchMode int
 
 const (
-	modeExactBID matchMode = iota // name == bid or name starts with "bid."
-	modeBIDOrName                 // exact bid, or contains app name (len>=3)
-	modeName                      // contains app name (len>=3)
-	modeVendor                    // name starts with "<vendor>."
+	modeExactBID  matchMode = iota // name == bid or name starts with "bid."
+	modeBIDOrName                  // exact bid, or contains app name (len>=3)
+	modeName                       // contains app name (len>=3)
+	modeVendor                     // name starts with "<vendor>."
 )
 
 // Match is one discovered leftover file or directory.

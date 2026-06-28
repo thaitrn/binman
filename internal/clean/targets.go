@@ -20,7 +20,7 @@ const (
 type Target struct {
 	ID, Name, Group string
 	Kind            Kind
-	Paths           func(home string) []string          // KindTrash candidate paths
+	Paths           func(home string) []string           // KindTrash candidate paths
 	Cmd             func(home string) (string, []string) // KindCommand binary + args
 }
 

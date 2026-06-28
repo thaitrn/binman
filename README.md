@@ -10,30 +10,42 @@ Requires Go 1.25+ and macOS.
 
 ```bash
 git clone <repo> binman && cd binman
-make install        # installs to ~/go/bin (ensure it's on $PATH)
+make install        # builds and installs to ~/go/bin (ensure it's on $PATH)
+# or just: make build && ./binman
 ```
 
-Optional (recommended for safe deletion): `brew install trash`
+Safe deletion uses the macOS `trash` tool — on macOS 15.2+ it ships built-in
+(`/usr/bin/trash`); on older systems run `brew install trash`. If absent, binman
+falls back to AppleScript (Finder → Trash).
 
 ## Usage
 
 ```bash
 binman uninstall <app>          # interactive TUI: review leftovers → confirm → Trash
-binman uninstall Slack -y       # non-interactive (apply)
-binman clean                    # dry-run report (default safe)
-binman clean --apply            # run cleanup
-binman clean --xcode --apply    # Xcode artifacts only
+binman uninstall Slack -y       # non-interactive: delete without prompting
+binman uninstall Slack -n       # preview only (dry-run)
+
+binman clean                    # dry-run report (caches + logs) — default safe
+binman clean --apply            # run the default cleanup
+binman clean --xcode --apply    # add Xcode artifacts
+binman clean --pkg --apply      # add brew/npm/pnpm/pip/docker cleanup
+binman clean --downloads --apply# add old installers in ~/Downloads
+binman clean --all --apply      # everything
 ```
 
 Global flag: `--dry-run/-n` — preview only, change nothing.
+
+**`uninstall` TUI keys:** `↑↓`/`jk` move · `space` toggle · `a` toggle all ·
+`enter` confirm · `q`/`esc` cancel. Group/Shared containers are unchecked by
+default to avoid removing shared data.
 
 ## Safety principles
 
 - Deletion = move to **Trash** (undoable via "Put Back"), never bare `rm` on user data.
 - `clean` defaults to **dry-run**; requires `--apply` to act.
 - Never touches SIP-protected paths (`/System`, `/usr`, `/bin`, `/sbin`, `/private/var/db`).
-- Excludes `com.apple.*` bundle IDs; warns before touching a running app's caches.
-- `/Library` (system, needs sudo) leftovers are skipped with a hint in the MVP.
+- Quits a running app before deleting its data; group containers off by default.
+- `/Library` (system, needs sudo) leftovers are reported but skipped in the MVP.
 
 ## Roadmap (out of MVP)
 
