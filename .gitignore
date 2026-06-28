@@ -1,0 +1,6 @@
+/binman
+/dist/
+*.test
+*.out
+.DS_Store
+coverage.txt
