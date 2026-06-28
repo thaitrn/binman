@@ -1,144 +1,184 @@
 package tui
 
 import (
-	"fmt"
-	"io"
+	"sort"
 
-	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/thaitrn/binman/internal/apps"
-	"github.com/thaitrn/binman/internal/human"
+	"github.com/thaitrn/binman/internal/scan"
 )
 
-// appItem adapts an apps.Entry for bubbles/list.
-type appItem struct{ entry apps.Entry }
-
-func (i appItem) FilterValue() string { return i.entry.App.Name + " " + i.entry.App.BundleID }
-
-// appMultiDelegate renders one row with a checkbox; selection state lives in
-// the shared *selected map (toggled by the model on space/a).
-type appMultiDelegate struct{ selected *map[string]bool }
-
-func (appMultiDelegate) Height() int                             { return 1 }
-func (appMultiDelegate) Spacing() int                            { return 0 }
-func (appMultiDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
-
-func (d appMultiDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
-	it, ok := item.(appItem)
-	if !ok {
-		return
-	}
-	path := it.entry.App.Path
-	box := "☐"
-	if (*d.selected)[path] {
-		box = checkStyle.Render("☑")
-	}
-	marker := "  "
-	style := noStyle()
-	if index == m.Index() {
-		marker = cursorStyle.Render("▸ ")
-		style = selectedRowStyle()
-	}
-	name := it.entry.App.Name
-	if it.entry.Protected {
-		name += sharedStyle.Render(" (system)")
-	}
-	pathW := m.Width() - 48
-	if pathW < 10 {
-		pathW = 10
-	}
-	fmt.Fprintln(w, style.Render(fmt.Sprintf("%s%s %-32s %10s  %s",
-		marker, box, truncate(name, 32), human.Bytes(it.entry.Size), truncate(path, pathW))))
+// scannedMsg delivers the leftover scan result for one app (async).
+type scannedMsg struct {
+	idx     int
+	path    string
+	matches []scan.Match
 }
 
-// pickerModel is the multi-select app list.
+// pickerModel is the two-pane app uninstaller: left = app list with size bars,
+// right = details + live leftover preview of the highlighted app.
 type pickerModel struct {
-	list     list.Model
-	entries  []apps.Entry
+	entries  []apps.Entry // sorted by size desc
+	maxSize  int64
 	selected map[string]bool
+	cursor   int
+	offset   int // first visible row
+	width    int
+	height   int
+	cache    map[string][]scan.Match // leftover scan cache, by app path
+	scanIdx  int                     // app index currently being scanned
 	canceled bool
 }
 
 func newPickerModel(entries []apps.Entry) *pickerModel {
-	selected := make(map[string]bool)
-	items := make([]list.Item, 0, len(entries))
-	for _, e := range entries {
-		items = append(items, appItem{entry: e})
+	es := make([]apps.Entry, len(entries))
+	copy(es, entries)
+	sort.SliceStable(es, func(i, j int) bool {
+		if es[i].Size != es[j].Size {
+			return es[i].Size > es[j].Size
+		}
+		return es[i].App.Name < es[j].App.Name
+	})
+	var max int64
+	for _, e := range es {
+		if e.Size > max {
+			max = e.Size
+		}
 	}
-	l := list.New(items, appMultiDelegate{selected: &selected}, 80, 20)
-	l.Title = "Select apps to uninstall"
-	l.SetShowStatusBar(false)
-	l.SetShowHelp(true)
-	l.SetFilteringEnabled(false) // list all apps; no type-to-filter
-	l.Styles.Title = titleStyle
-	l.Styles.PaginationStyle = helpStyle
-	l.Styles.HelpStyle = helpStyle
-	return &pickerModel{list: l, entries: entries, selected: selected}
+	return &pickerModel{
+		entries:  es,
+		maxSize:  max,
+		selected: make(map[string]bool),
+		cache:    make(map[string][]scan.Match),
+	}
 }
 
-func (m *pickerModel) Init() tea.Cmd { return nil }
+func (m *pickerModel) Init() tea.Cmd { return m.scanCmd() }
 
 func (m *pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.list.SetWidth(msg.Width)
-		m.list.SetHeight(msg.Height)
+		m.width, m.height = msg.Width, msg.Height
+		m.clampOffset()
+		return m, m.scanCmd()
+	case scannedMsg:
+		m.cache[msg.path] = msg.matches
+		return m, nil
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "enter":
-			return m, tea.Quit
-		case "ctrl+c", "esc":
+		case "ctrl+c", "esc", "q":
 			m.canceled = true
 			return m, tea.Quit
-		case "q":
-			if m.list.FilterState() == list.Unfiltered {
-				m.canceled = true
-				return m, tea.Quit
-			}
+		case "enter":
+			return m, tea.Quit
+		case "up", "k":
+			m.moveCursor(-1)
+			return m, m.scanCmd()
+		case "down", "j":
+			m.moveCursor(1)
+			return m, m.scanCmd()
+		case "pgup":
+			m.moveCursor(-m.listHeight())
+			return m, m.scanCmd()
+		case "pgdown":
+			m.moveCursor(m.listHeight())
+			return m, m.scanCmd()
 		case " ":
 			m.toggleCurrent()
-			return m, nil
+		case "g":
+			m.setCursor(0)
+			return m, m.scanCmd()
+		case "G":
+			m.setCursor(len(m.entries) - 1)
+			return m, m.scanCmd()
 		case "a":
-			m.toggleAllVisible()
-			return m, nil
+			m.toggleAll()
 		}
 	}
-	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
-	return m, cmd
+	return m, nil
+}
+
+// scanCmd returns a command that scans the highlighted app's leftovers, unless
+// already cached. The scan runs asynchronously so the UI never blocks.
+func (m *pickerModel) scanCmd() tea.Cmd {
+	if len(m.entries) == 0 {
+		return nil
+	}
+	idx := m.cursor
+	a := m.entries[idx].App
+	if _, ok := m.cache[a.Path]; ok {
+		return nil
+	}
+	m.scanIdx = idx
+	path := a.Path
+	app := a
+	return func() tea.Msg {
+		ms, _ := scan.Scan(app)
+		return scannedMsg{idx: idx, path: path, matches: ms}
+	}
+}
+
+func (m *pickerModel) moveCursor(delta int) { m.setCursor(m.cursor + delta) }
+
+func (m *pickerModel) setCursor(i int) {
+	if len(m.entries) == 0 {
+		return
+	}
+	if i < 0 {
+		i = 0
+	}
+	if i > len(m.entries)-1 {
+		i = len(m.entries) - 1
+	}
+	m.cursor = i
+	m.clampOffset()
+}
+
+func (m *pickerModel) clampOffset() {
+	h := m.listHeight()
+	if h <= 0 {
+		return
+	}
+	if m.cursor < m.offset {
+		m.offset = m.cursor
+	}
+	if m.cursor >= m.offset+h {
+		m.offset = m.cursor - h + 1
+	}
+	if m.offset < 0 {
+		m.offset = 0
+	}
 }
 
 func (m *pickerModel) toggleCurrent() {
-	it, ok := m.list.SelectedItem().(appItem)
-	if !ok {
+	if len(m.entries) == 0 {
 		return
 	}
-	p := it.entry.App.Path
+	p := m.entries[m.cursor].App.Path
 	m.selected[p] = !m.selected[p]
 }
 
-// toggleAllVisible flips every item in the current (possibly filtered) view.
-func (m *pickerModel) toggleAllVisible() {
-	allOn := true
-	for _, it := range m.list.Items() {
-		if ai, ok := it.(appItem); ok && !m.selected[ai.entry.App.Path] {
-			allOn = false
-			break
-		}
-	}
-	for _, it := range m.list.Items() {
-		if ai, ok := it.(appItem); ok {
-			m.selected[ai.entry.App.Path] = !allOn
+func (m *pickerModel) toggleAll() {
+	allOn := len(m.selected) >= len(m.entries)
+	m.selected = make(map[string]bool)
+	if !allOn {
+		for _, e := range m.entries {
+			m.selected[e.App.Path] = true
 		}
 	}
 }
 
-func (m *pickerModel) View() string { return m.list.View() }
+// listHeight is the number of app rows that fit in the left pane.
+func (m *pickerModel) listHeight() int {
+	h := m.height - 6 // title(1) + header(1) + status(2) + borders(2)
+	if h < 1 {
+		return 1
+	}
+	return h
+}
 
-// SelectApps runs the multi-select picker and returns the chosen entries plus
-// whether the user confirmed (vs canceled).
+// SelectApps runs the picker TUI and returns the chosen entries.
 func SelectApps(entries []apps.Entry) ([]apps.Entry, bool, error) {
 	if len(entries) == 0 {
 		return nil, false, nil
@@ -160,9 +200,4 @@ func SelectApps(entries []apps.Entry) ([]apps.Entry, bool, error) {
 		}
 	}
 	return out, true, nil
-}
-
-func noStyle() lipgloss.Style { return lipgloss.NewStyle() }
-func selectedRowStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true)
 }

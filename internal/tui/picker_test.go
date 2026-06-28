@@ -16,36 +16,59 @@ func TestPickerModel_ViewRenders(t *testing.T) {
 		{App: &app.App{Name: "Beta", BundleID: "com.x.beta", Path: "/Applications/Beta.app"}, Size: 2048, Protected: true},
 	}
 	m := newPickerModel(entries)
-	m.list.SetWidth(100)
+	m.width, m.height = 100, 24
 	out := m.View()
-	for _, want := range []string{"Select apps", "Alpha", "Beta", "system"} {
+	for _, want := range []string{"binman", "Alpha", "Beta", "APP", "system"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("picker View() missing %q\n---\n%s", want, out)
+			t.Errorf("picker View() missing %q", want)
 		}
 	}
 }
 
-// TestPickerModel_Toggle verifies space toggles selection and 'a' toggles all.
 func TestPickerModel_Toggle(t *testing.T) {
 	entries := []apps.Entry{
-		{App: &app.App{Name: "Alpha", BundleID: "com.x.alpha", Path: "/Applications/Alpha.app"}},
-		{App: &app.App{Name: "Beta", BundleID: "com.x.beta", Path: "/Applications/Beta.app"}},
+		{App: &app.App{Name: "Alpha", BundleID: "com.x.alpha", Path: "/a.app"}},
+		{App: &app.App{Name: "Beta", BundleID: "com.x.beta", Path: "/b.app"}},
 	}
 	m := newPickerModel(entries)
-	// cursor at Alpha (index 0); space toggles it on
+	m.width, m.height = 100, 24
+
+	// cursor at 0; space toggles Alpha on
 	m = step(m, tea.KeyMsg{Type: tea.KeySpace}).(*pickerModel)
-	if !m.selected["/Applications/Alpha.app"] {
+	if !m.selected["/a.app"] {
 		t.Error("Alpha should be selected after space")
 	}
-	// 'a' toggles all (none fully selected -> all on)
+	// 'a': not all selected -> select all
 	m = step(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}).(*pickerModel)
-	if !m.selected["/Applications/Alpha.app"] || !m.selected["/Applications/Beta.app"] {
+	if !m.selected["/a.app"] || !m.selected["/b.app"] {
 		t.Error("'a' should select all")
 	}
-	// 'a' again -> all off
+	// 'a' again: all selected -> clear
 	m = step(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}).(*pickerModel)
-	if m.selected["/Applications/Alpha.app"] || m.selected["/Applications/Beta.app"] {
-		t.Error("'a' should deselect all when all selected")
+	if len(m.selected) != 0 {
+		t.Error("'a' should clear all when all selected")
+	}
+}
+
+func TestPickerModel_Navigation(t *testing.T) {
+	entries := []apps.Entry{
+		{App: &app.App{Name: "A", BundleID: "c.a", Path: "/a.app"}},
+		{App: &app.App{Name: "B", BundleID: "c.b", Path: "/b.app"}},
+		{App: &app.App{Name: "C", BundleID: "c.c", Path: "/c.app"}},
+	}
+	m := newPickerModel(entries)
+	m.width, m.height = 80, 20
+	if m.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0", m.cursor)
+	}
+	m = step(m, tea.KeyMsg{Type: tea.KeyDown}).(*pickerModel)
+	if m.cursor != 1 {
+		t.Errorf("cursor = %d, want 1 after down", m.cursor)
+	}
+	m = step(m, tea.KeyMsg{Type: tea.KeyDown}).(*pickerModel)
+	m = step(m, tea.KeyMsg{Type: tea.KeyDown}).(*pickerModel) // past end -> stays at last
+	if m.cursor != 2 {
+		t.Errorf("cursor = %d, want 2 (clamped)", m.cursor)
 	}
 }
 
@@ -61,7 +84,7 @@ func TestConfirmBatch_ViewRenders(t *testing.T) {
 	out := m.View()
 	for _, want := range []string{"Uninstall 2 app(s)", "Alpha", "Beta", "leftover", "shared"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("ConfirmBatch View() missing %q\n---\n%s", want, out)
+			t.Errorf("ConfirmBatch View() missing %q\n%s", want, out)
 		}
 	}
 }

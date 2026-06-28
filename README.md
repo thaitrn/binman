@@ -39,9 +39,11 @@ binman clean --all --apply   # everything (xcode + pkg + downloads)
 4. **Process** — progress bar; items moved to Trash.
 5. **Results** — summary (items moved, space freed).
 
-**Keys:** `↑↓`/`jk` move · `space` toggle · `a` toggle all · `enter` confirm ·
-`q`/`esc`/`ctrl+c` cancel. All apps are listed (no filter). Shared/group
-containers are off by default; system apps (`/System`) are shown marked but skipped.
+**Keys:** `↑↓`/`jk` move · `pgup`/`pgdown` page · `g`/`G` top/bottom ·
+`space` toggle · `a` toggle all · `enter` confirm · `q`/`esc`/`ctrl+c` cancel.
+Apps are listed sorted by size (biggest first) with proportional size bars; the
+right pane previews the highlighted app's leftovers live. Shared/group containers
+are off by default; system apps (`/System`) are shown marked (⊘) and skipped.
 
 ## Safety principles
 

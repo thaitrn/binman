@@ -3,13 +3,18 @@
 package scan
 
 import (
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/thaitrn/binman/internal/app"
 )
+
+// errDirSizeTimeout is returned when a DirSize walk exceeds its time bound.
+var errDirSizeTimeout = errors.New("dir size: timed out (path blocked or too large)")
 
 // Type classifies a leftover match.
 type Type string
@@ -118,20 +123,39 @@ func vendorPrefix(bid string) string {
 }
 
 // DirSize sums file sizes recursively; unreadable entries are skipped silently.
-// Exported so other packages (e.g. clean) can reuse it.
+// It is time-bounded: a single blocked directory open (seen on some macOS
+// firmlink/TCC paths) cannot hang the caller — after dirSizeTimeout it returns
+// the partial total. Exported so other packages (e.g. clean) can reuse it.
 func DirSize(path string) (int64, error) {
-	var total int64
-	err := filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+	type result struct {
+		size int64
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		var total int64
+		err := filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			if fi, e := d.Info(); e == nil {
+				total += fi.Size()
+			}
 			return nil
-		}
-		if fi, e := d.Info(); e == nil {
-			total += fi.Size()
-		}
-		return nil
-	})
-	return total, err
+		})
+		ch <- result{total, err}
+	}()
+	select {
+	case r := <-ch:
+		return r.size, r.err
+	case <-time.After(dirSizeTimeout):
+		return 0, errDirSizeTimeout
+	}
 }
+
+// dirSizeTimeout bounds a single DirSize walk. macOS can block a directory
+// open for a very long time on certain protected/firmlink paths.
+const dirSizeTimeout = 5 * time.Second
 
 func readDirNames(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
